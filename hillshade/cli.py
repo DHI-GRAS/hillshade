@@ -145,9 +145,6 @@ def cli(elevation_infile, s2_dirs, shaded_outfile, chunk_size, workers):
         transform = src.transform
         resolution = src.res
 
-        r = np.array([src.transform * (0.15, 1.)])
-        print(r - np.array([src.transform.xoff, src.transform.yoff]))
-
     shadow = np.zeros(elevation_model.shape, dtype=int)
     for raw_data_dir in tqdm.tqdm(s2_dirs, desc="Angles"):
         shadow += _run_shader(
