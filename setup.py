@@ -7,6 +7,7 @@ setup(
     install_requires=[
         'Click',
         'Numpy',
+        'Numba',
         'tqdm',
         'rasterio',
     ],
