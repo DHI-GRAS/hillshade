@@ -7,7 +7,7 @@ import numpy as np
 import rasterio
 import tqdm
 import click
-from .main import intersect_shadow
+from .hillshade import hillshade
 
 class GlobbityGlob(click.ParamType):
    """Expands a glob pattern to Path objects"""
@@ -66,7 +66,10 @@ def _get_grid_dimensions(metafile: pathlib.Path) -> Generator[int, int, int]:
 @click.argument('elevation_infile', type=click.Path(file_okay=True))
 @click.argument('s2_dirs', type=GlobbityGlob())
 @click.argument('shaded_outfile', type=click.Path(file_okay=True))
-def cli(elevation_infile, s2_dirs, shaded_outfile):
+@click.option("--chunk-size", default=None, type=int,
+              help="""Chunk size of the image in y direction that is processed at a time.\
+ Only affects the progress bar update frequency. Defaults to 100.""")
+def cli(elevation_infile, s2_dirs, shaded_outfile, chunk_size=None):
     """Calculates shaded regions based on and elevation model and incident angles
     that are read from S2 raw data directories.
 
@@ -78,12 +81,15 @@ def cli(elevation_infile, s2_dirs, shaded_outfile):
 
         shaded_outfile:     output file (.tif)
     """
+    if chunk_size is None:
+        chunk_size = 100
 
     with rasterio.open(elevation_infile, 'r') as src:
         profile = src.profile.copy()
         elevation_model = src.read()[0]
 
     shades = []
+    shadow = np.zeros(elevation_model.shape, dtype=np.int32)
     for raw_data_dir in tqdm.tqdm(s2_dirs):
 
         meta_file = _get_metafile(raw_data_dir)
@@ -99,15 +105,20 @@ def cli(elevation_infile, s2_dirs, shaded_outfile):
                     "Could not find a resolution for elevation model of shape {}"
                     .format(elevation_model.shape))
 
-        shadow = intersect_shadow(elevation_model, zenith, azimuth, dx=resolution, dy=resolution)
-        shades.append(shadow)
+        shadow[:,:] = 0
+        for ystart in tqdm.tqdm(np.arange(0, elevation_model.shape[0], chunk_size)):
+            yend = min(ystart+chunk_size, elevation_model.shape[0])
+            hillshade(elevation_model, shadow, zenith, azimuth, resolution, ystart, yend)
+        shades.append(shadow.copy())
+
     shadow = np.sum(shades, axis=0)
+    shadow = shadow.astype(float)
     shadow /= shadow.max()
 
     profile.update(
-        dtype=np.int32,
+        dtype=np.float64,
         count=1,
         compress='lzw',
         nodata=None)
     with rasterio.open(shaded_outfile, 'w', **profile) as dst:
-        dst.write(shadow.astype(np.int32), 1)
+        dst.write(shadow, 1)

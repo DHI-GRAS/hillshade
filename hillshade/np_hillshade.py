@@ -18,7 +18,7 @@ def check_bounds(x: np.ndarray, y: np.ndarray, bounds: Tuple[int, int]) -> np.nd
 def xyray_vector(azimuth: float) -> np.ndarray:
     """Direction of the sun ray vector in the xy-plane with one component set to one
     depending on the slope of the vector."""
-    x, y = np.cos(azimuth), np.sin(azimuth)
+    x, y = np.sin(azimuth), np.cos(azimuth)
     m = y/x
     if m < 1. and m > -1.:
         y = m
@@ -63,13 +63,11 @@ def intersect_shadow(elevation_model: np.ndarray, zenith: float, azimuth: float,
         inter_mask = np.logical_and(z_below, intersections == 0)
         intersections[inter_mask] = 1
 
-        true_y[within_bounds] += ray[0]
-        true_x[within_bounds] += ray[1]
+        true_y[within_bounds] += ray[1]
+        true_x[within_bounds] += ray[0]
         within_bounds = check_bounds(true_x, true_y, bounds)
         grid_y[within_bounds] = true_y[within_bounds].astype(int)
         grid_x[within_bounds] = true_x[within_bounds].astype(int)
     pbar.close()
 
     return intersections
-
-
