@@ -1,4 +1,3 @@
-import os
 import glob
 import pathlib
 import concurrent.futures
@@ -10,12 +9,14 @@ import tqdm
 import click
 from .hillshade import hillshade
 
-class GlobbityGlob(click.ParamType):
-   """Expands a glob pattern to Path objects"""
-   name = 'glob'
 
-   def convert(self, value: str, *args: Any) -> List[pathlib.Path]:
-       return [pathlib.Path(f) for f in glob.glob(value)]
+class GlobbityGlob(click.ParamType):
+    """Expands a glob pattern to Path objects"""
+    name = 'glob'
+
+    def convert(self, value: str, *args: Any) -> List[pathlib.Path]:
+        return [pathlib.Path(f) for f in glob.glob(value)]
+
 
 def _get_metafile(raw_data_dir: pathlib.Path) -> pathlib.Path:
     granule_dir = raw_data_dir.joinpath("GRANULE").glob("*")
@@ -23,11 +24,13 @@ def _get_metafile(raw_data_dir: pathlib.Path) -> pathlib.Path:
     meta_file = granule_dir.joinpath("MTD_TL.xml")
     return meta_file
 
+
 def _get_node(root, node_name):
     for node in root:
         if node_name in node.tag:
             return node
     return None
+
 
 def _get_mean_angles(metafile: pathlib.Path) -> Tuple[float, float]:
     tree = ET.parse(metafile)
@@ -43,6 +46,7 @@ def _get_mean_angles(metafile: pathlib.Path) -> Tuple[float, float]:
         else:
             raise ValueError("Unkown angle: {}".format(angle.tag))
     return zenith, azimuth
+
 
 def _get_grid_dimensions(metafile: pathlib.Path) -> Generator[int, int, int]:
     tree = ET.parse(metafile)
@@ -75,19 +79,34 @@ def _get_resolution(shape, meta_file):
     return resolution
 
 
-def _run_shader(raw_data_dir, elevation_model, chunk_size, num_workers, resolution=None):
+def xyray_vector(azimuth, transform):
+    azimuth = np.deg2rad(azimuth)
+    x, y = np.sin(azimuth), np.cos(azimuth)
+    x, y = transform * (x, y)
+    x -= transform.xoff
+    y -= transform.yoff
+    m = y/x
+    if m < 1. and m > -1.:
+        y = m
+        x = 1.
+    else:
+        y = 1.
+        x = 1./m
+    return x, y
+
+
+def _run_shader(raw_data_dir, elevation_model, transform, resolution, chunk_size, num_workers):
     meta_file = _get_metafile(raw_data_dir)
     zenith, azimuth = _get_mean_angles(meta_file)
-    if resolution is None:
-        resolution = _get_resolution(elevation_model.shape, meta_file)
+    ray = xyray_vector(azimuth, transform)
 
     def worker(ystart):
         yend = min(ystart+chunk_size, elevation_model.shape[0])
-        shadow = hillshade(elevation_model, zenith, azimuth, resolution, ystart, yend)
+        shadow = hillshade(elevation_model, zenith, ray, resolution, ystart, yend)
         return shadow
 
     with concurrent.futures.ThreadPoolExecutor(num_workers) as executor:
-        ystart  = np.arange(0, elevation_model.shape[0], chunk_size)
+        ystart = np.arange(0, elevation_model.shape[0], chunk_size)
         results = executor.map(worker, ystart)
         shadow = []
         pbar = tqdm.tqdm(total=ystart.shape[0], desc="Image chunks")
@@ -97,6 +116,7 @@ def _run_shader(raw_data_dir, elevation_model, chunk_size, num_workers, resoluti
         pbar.close()
         shadow = np.vstack(shadow)
     return shadow
+
 
 @click.command()
 @click.argument('elevation_infile', type=click.Path(file_okay=True))
@@ -122,10 +142,16 @@ def cli(elevation_infile, s2_dirs, shaded_outfile, chunk_size, workers):
     with rasterio.open(elevation_infile, 'r') as src:
         profile = src.profile.copy()
         elevation_model = src.read()[0]
+        transform = src.transform
+        resolution = src.res
+
+        r = np.array([src.transform * (0.15, 1.)])
+        print(r - np.array([src.transform.xoff, src.transform.yoff]))
 
     shadow = np.zeros(elevation_model.shape, dtype=int)
     for raw_data_dir in tqdm.tqdm(s2_dirs, desc="Angles"):
-        shadow += _run_shader(raw_data_dir, elevation_model, chunk_size, num_workers=workers)
+        shadow += _run_shader(
+                raw_data_dir, elevation_model, transform, resolution, chunk_size, workers)
     shadow = shadow.astype(np.float32)
     shadow /= shadow.max()
 
