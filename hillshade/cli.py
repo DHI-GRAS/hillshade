@@ -1,6 +1,7 @@
 import os
 import glob
 import pathlib
+import concurrent.futures
 from typing import Any, List, Tuple, Generator
 import xml.etree.ElementTree as ET
 import numpy as np
@@ -62,14 +63,50 @@ def _get_grid_dimensions(metafile: pathlib.Path) -> Generator[int, int, int]:
             yield (nrows, ncols, resolution)
 
 
+def _get_resolution(shape, meta_file):
+    resolution = None
+    erows, ecols = shape
+    for nrows, ncols, res in _get_grid_dimensions(meta_file):
+        if nrows == erows and ncols == ecols:
+            resolution = res
+    if resolution is None:
+        raise ValueError(
+                "Could not find a resolution for elevation model of shape {}".format(shape))
+    return resolution
+
+
+def _run_shader(raw_data_dir, elevation_model, chunk_size, num_workers, resolution=None):
+    meta_file = _get_metafile(raw_data_dir)
+    zenith, azimuth = _get_mean_angles(meta_file)
+    if resolution is None:
+        resolution = _get_resolution(elevation_model.shape, meta_file)
+
+    def worker(ystart):
+        yend = min(ystart+chunk_size, elevation_model.shape[0])
+        shadow = hillshade(elevation_model, zenith, azimuth, resolution, ystart, yend)
+        return shadow
+
+    with concurrent.futures.ThreadPoolExecutor(num_workers) as executor:
+        ystart  = np.arange(0, elevation_model.shape[0], chunk_size)
+        results = executor.map(worker, ystart)
+        shadow = []
+        pbar = tqdm.tqdm(total=ystart.shape[0], desc="Image chunks")
+        for res in results:
+            shadow.append(res)
+            pbar.update()
+        pbar.close()
+        shadow = np.vstack(shadow)
+    return shadow
+
 @click.command()
 @click.argument('elevation_infile', type=click.Path(file_okay=True))
 @click.argument('s2_dirs', type=GlobbityGlob())
 @click.argument('shaded_outfile', type=click.Path(file_okay=True))
-@click.option("--chunk-size", default=None, type=int,
+@click.option("--chunk-size", default=100, type=int,
               help="""Chunk size of the image in y direction that is processed at a time.\
  Only affects the progress bar update frequency. Defaults to 100.""")
-def cli(elevation_infile, s2_dirs, shaded_outfile, chunk_size=None):
+@click.option("--workers", default=4, help="Number of workers. Defaults to 4.")
+def cli(elevation_infile, s2_dirs, shaded_outfile, chunk_size, workers):
     """Calculates shaded regions based on and elevation model and incident angles
     that are read from S2 raw data directories.
 
@@ -81,42 +118,19 @@ def cli(elevation_infile, s2_dirs, shaded_outfile, chunk_size=None):
 
         shaded_outfile:     output file (.tif)
     """
-    if chunk_size is None:
-        chunk_size = 100
 
     with rasterio.open(elevation_infile, 'r') as src:
         profile = src.profile.copy()
         elevation_model = src.read()[0]
 
-    shades = []
-    shadow = np.zeros(elevation_model.shape, dtype=np.int32)
-    for raw_data_dir in tqdm.tqdm(s2_dirs):
-
-        meta_file = _get_metafile(raw_data_dir)
-        zenith, azimuth = _get_mean_angles(meta_file)
-
-        resolution = None
-        erows, ecols = elevation_model.shape
-        for nrows, ncols, res in _get_grid_dimensions(meta_file):
-            if nrows == erows and ncols == ecols:
-                resolution = res
-        if resolution is None:
-            raise ValueError(
-                    "Could not find a resolution for elevation model of shape {}"
-                    .format(elevation_model.shape))
-
-        shadow[:,:] = 0
-        for ystart in tqdm.tqdm(np.arange(0, elevation_model.shape[0], chunk_size)):
-            yend = min(ystart+chunk_size, elevation_model.shape[0])
-            hillshade(elevation_model, shadow, zenith, azimuth, resolution, ystart, yend)
-        shades.append(shadow.copy())
-
-    shadow = np.sum(shades, axis=0)
-    shadow = shadow.astype(float)
+    shadow = np.zeros(elevation_model.shape, dtype=int)
+    for raw_data_dir in tqdm.tqdm(s2_dirs, desc="Angles"):
+        shadow += _run_shader(raw_data_dir, elevation_model, chunk_size, num_workers=workers)
+    shadow = shadow.astype(np.float32)
     shadow /= shadow.max()
 
     profile.update(
-        dtype=np.float64,
+        dtype=shadow.dtype,
         count=1,
         compress='lzw',
         nodata=None)
