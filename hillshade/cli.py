@@ -115,25 +115,22 @@ def run_shader(elevation_model, transform, resolution, zenith, azimuth, chunk_si
 
 
 @click.command()
-@click.argument('elevation_infile', type=click.Path(dir_okay=False))
 @click.argument('s2_dirs', type=GlobbityGlob())
-@click.argument('shaded_outfile', type=click.Path(dir_okay=False))
-@click.option('--chunk-size', default=100, type=int,
-              help='''Chunk size of the image in y direction that is processed at a time.\
- Only affects the progress bar update frequency. Defaults to 100.''')
-@click.option('--workers', default=4, help='Number of workers. Defaults to 4.')
-def cli(elevation_infile, s2_dirs, shaded_outfile, chunk_size, workers):
+@click.option(
+    '--elevation-infile', "-i", type=click.Path(dir_okay=False), required=True,
+    help='Input elevation model (.tif)')
+@click.option(
+    '--shaded-outfile', "-o", type=click.Path(dir_okay=False), required=True,
+    help='Output file with shaded regions. The output is one where there is always shade'
+    'and zero where the sun always shines!')
+@click.option(
+    '--chunk-size', default=100, type=int, show_default=True,
+    help='Chunk size of the image in y direction that is processed at a time.'
+    'Only affects the progress bar update frequency.')
+@click.option('--workers', default=4, show_default=True, help='Number of workers.')
+def cli(s2_dirs, elevation_infile, shaded_outfile, chunk_size, workers):
     """Calculates shaded regions based on and elevation model and incident angles
-    that are read from S2 raw data directories.
-
-    Parameters:
-
-        elevation_infile:   elevation model (.tif)
-
-        s2_dirs:            S2 raw data directories
-
-        shaded_outfile:     output file (.tif)
-    """
+    that are read from S2 raw data directories."""
     if not s2_dirs:
         raise IOError('S2 directory does not exist.')
 
