@@ -12,6 +12,16 @@ setup(
         'tqdm',
         'rasterio',
     ],
+    extras_require={
+        'test': [
+            'pytest>=3.5',
+            'pytest-cov',
+            'pytest-mypy',
+            'pytest-flake8',
+            'codecov',
+            'attrs>=17.4.0',
+        ],
+    },
     entry_points='''
         [console_scripts]
         hillshade=hillshade.cli:cli
