@@ -20,6 +20,7 @@ class GlobbityGlob(click.ParamType):
 
 
 def _get_metafile(raw_data_dir: pathlib.Path) -> pathlib.Path:
+    """Finds the GRANULE meta file in a S2 data directory."""
     granule_dir = raw_data_dir.joinpath('GRANULE')
     granule_sub_dir = granule_dir.glob('*')
     try:
@@ -33,6 +34,7 @@ def _get_metafile(raw_data_dir: pathlib.Path) -> pathlib.Path:
 
 
 def _get_mean_angles(metafile: pathlib.Path) -> Tuple[float, float]:
+    """Retrieves zenith and azimuth (in degrees) from a GRANULE metafile."""
     tree = etree.parse(str(metafile))
     root = tree.getroot()
 
@@ -51,47 +53,71 @@ def _get_mean_angles(metafile: pathlib.Path) -> Tuple[float, float]:
     return zenith, azimuth
 
 
-def xyray_vector(azimuth, transform):
+def rasterize(azimuth, transform=None):
+    """Convert the azimuth into its components on the XY-plane. Depending on the value of the
+    azimuth either the x or the y component of the resulting vector is scaled to 1, so that
+    it can be used conveniently to walk a grid.
+    """
     azimuth = np.deg2rad(azimuth)
-    x, y = np.sin(azimuth), np.cos(azimuth)
-    x, y = transform * (x, y)
-    x -= transform.xoff
-    y -= transform.yoff
-    m = y/x
-    if m < 1. and m > -1.:
-        y = m
-        x = 1.
+    xdir, ydir = np.sin(azimuth), np.cos(azimuth)
+
+    if transform is not None:
+        xdir, ydir = transform * (xdir, ydir)
+        xdir -= transform.xoff
+        ydir -= transform.yoff
+
+    slope = ydir/xdir
+    if slope < 1. and slope > -1.:
+        xdir = 1.
+        ydir = slope
     else:
-        y = 1.
-        x = 1./m
-    return x, y
+        xdir = 1./slope
+        ydir = 1.
+    return xdir, ydir
 
 
 def run_shader(elevation_model, transform, resolution, zenith, azimuth, chunk_size=100, workers=4):
-    ray = xyray_vector(azimuth, transform)
+    """Calculate shaded regions based on the elevation model and the incident angles of the sun.
+
+    Params:
+        elevation_model (np.ndarray):
+            Two-dimensional array specifying the elevation at each point of the grid.
+        transform (rasterio.affine.Affine):
+            Affine transform of the elevation_model
+        resolution (tuple):
+            resolution in meters of the elevation_model
+        zenith (float):
+            zenith in degrees
+        azimuth (float):
+            azimuth in degrees
+        chunk_size (int):
+            splits the shading calculation into chunk sized tiles in the y-direction
+        workers (int):
+            number of threads to spawn
+    """
+    ray = rasterize(azimuth, transform)
 
     def worker(ystart):
         yend = min(ystart+chunk_size, elevation_model.shape[0])
-        shadow = hillshade(elevation_model, zenith, ray, resolution, ystart, yend)
+        shadow = hillshade(elevation_model, resolution, zenith, ray, ystart, yend)
         return shadow
 
     with concurrent.futures.ThreadPoolExecutor(workers) as executor:
         ystart = np.arange(0, elevation_model.shape[0], chunk_size)
         results = executor.map(worker, ystart)
         shadow = []
-        pbar = tqdm.tqdm(total=ystart.shape[0], desc='Image chunks')
-        for res in results:
-            shadow.append(res)
-            pbar.update()
-        pbar.close()
+        with tqdm.tqdm(total=ystart.shape[0], desc='Image chunks') as pbar:
+            for res in results:
+                shadow.append(res)
+                pbar.update()
         shadow = np.vstack(shadow)
     return shadow
 
 
 @click.command()
-@click.argument('elevation_infile', type=click.Path(file_okay=True))
+@click.argument('elevation_infile', type=click.Path(dir_okay=False))
 @click.argument('s2_dirs', type=GlobbityGlob())
-@click.argument('shaded_outfile', type=click.Path(file_okay=True))
+@click.argument('shaded_outfile', type=click.Path(dir_okay=False))
 @click.option('--chunk-size', default=100, type=int,
               help='''Chunk size of the image in y direction that is processed at a time.\
  Only affects the progress bar update frequency. Defaults to 100.''')
@@ -113,7 +139,7 @@ def cli(elevation_infile, s2_dirs, shaded_outfile, chunk_size, workers):
 
     with rasterio.open(elevation_infile, 'r') as src:
         profile = src.profile.copy()
-        elevation_model = src.read()[0]
+        elevation_model = src.read(1)
         transform = src.transform
         resolution = src.res
 
@@ -122,7 +148,7 @@ def cli(elevation_infile, s2_dirs, shaded_outfile, chunk_size, workers):
         meta_file = _get_metafile(raw_data_dir)
         zenith, azimuth = _get_mean_angles(meta_file)
         shadow += run_shader(
-                elevation_model, transform, resolution, zenith, azimuth, chunk_size, workers)
+            elevation_model, transform, resolution, zenith, azimuth, chunk_size, workers)
     shadow = shadow.astype(np.float32)
     shadow /= shadow.max()
 
