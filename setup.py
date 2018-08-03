@@ -5,6 +5,7 @@ setup(
     version='0.1',
     py_modules=['hillshade'],
     install_requires=[
+        'lxml',
         'Click',
         'Numpy',
         'Numba',
