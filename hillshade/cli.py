@@ -26,7 +26,7 @@ def _get_metafile(raw_data_dir: pathlib.Path) -> pathlib.Path:
     try:
         granule_sub_dir = next(granule_sub_dir)
     except StopIteration:
-        raise IOError(f'GRANULE subdirectory "{granule_dir}\*" does not exist.')
+        raise IOError(f'subdirectory of "{granule_dir}" does not exist.')
     meta_file = granule_sub_dir.joinpath('MTD_TL.xml')
     if not meta_file.exists():
         raise IOError(f'GRANULE meta file "{meta_file}" does not exist.')
@@ -66,12 +66,12 @@ def rasterize(azimuth, transform=None):
         xdir -= transform.xoff
         ydir -= transform.yoff
 
-    slope = ydir/xdir
+    slope = ydir / xdir
     if slope < 1. and slope > -1.:
         xdir = 1.
         ydir = slope
     else:
-        xdir = 1./slope
+        xdir = 1. / slope
         ydir = 1.
     return xdir, ydir
 
@@ -98,7 +98,7 @@ def run_shader(elevation_model, transform, resolution, zenith, azimuth, chunk_si
     ray = rasterize(azimuth, transform)
 
     def worker(ystart):
-        yend = min(ystart+chunk_size, elevation_model.shape[0])
+        yend = min(ystart + chunk_size, elevation_model.shape[0])
         shadow = hillshade(elevation_model, resolution, zenith, ray, ystart, yend)
         return shadow
 

@@ -23,7 +23,7 @@ def hillshade(elevation_model, resolution, zenith, ray, ystart, yend):
     pixel of the elevation model and tracing the path towards the sun until an obstacle is
     hit or the maximum elevation of the model is reached. The path is defined by a rasterized
     direction of the sun ray in the xy-plane (ray) and the zenith.
-    
+
     Params:
         elevation_model (np.ndarray):
             Two-dimensional array specifying the elevation at each point of the grid.
@@ -43,7 +43,7 @@ def hillshade(elevation_model, resolution, zenith, ray, ystart, yend):
     """
     if max(ray) != 1.:
         raise ValueError("xy-direction is not rasterized.")
-    shadow = np.zeros((yend-ystart, elevation_model.shape[1]), dtype=np.int64)
+    shadow = np.zeros((yend - ystart, elevation_model.shape[1]), dtype=np.int64)
     zenith = np.deg2rad(90 - zenith)
     dx, dy = ray
     xres, yres = resolution
@@ -59,7 +59,9 @@ def hillshade(elevation_model, resolution, zenith, ray, ystart, yend):
             intersection = None
 
             while within_bounds(ray_x, ray_y, bounds):
-                ray_z = height((ray_x-pixel_x)*xres, (ray_y-pixel_y)*yres, zenith) + pixel_z
+                xbase = (ray_x - pixel_x) * xres
+                ybase = (ray_y - pixel_y) * yres
+                ray_z = height(xbase, ybase, zenith) + pixel_z
                 if ray_z > z_max:
                     break
                 if ray_z < elevation_model[int(ray_y), int(ray_x)]:
@@ -69,5 +71,5 @@ def hillshade(elevation_model, resolution, zenith, ray, ystart, yend):
                 ray_y += dy
 
             if intersection is not None:
-                shadow[pixel_y-ystart, pixel_x] = 1
+                shadow[pixel_y - ystart, pixel_x] = 1
     return shadow
