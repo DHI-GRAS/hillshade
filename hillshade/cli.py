@@ -1,13 +1,14 @@
 import glob
 import pathlib
 import concurrent.futures
-from typing import Any, List, Tuple, Generator
-import xml.etree.ElementTree as ET
+from typing import Any, List, Tuple
+
+from lxml import etree
 import numpy as np
 import rasterio
 import tqdm
 import click
-from .hillshade import hillshade
+from hillshade.hillshade import hillshade
 
 
 class GlobbityGlob(click.ParamType):
@@ -19,64 +20,35 @@ class GlobbityGlob(click.ParamType):
 
 
 def _get_metafile(raw_data_dir: pathlib.Path) -> pathlib.Path:
-    granule_dir = raw_data_dir.joinpath("GRANULE").glob("*")
-    granule_dir = next(granule_dir)
-    meta_file = granule_dir.joinpath("MTD_TL.xml")
+    granule_dir = raw_data_dir.joinpath('GRANULE')
+    granule_sub_dir = granule_dir.glob('*')
+    try:
+        granule_sub_dir = next(granule_sub_dir)
+    except StopIteration:
+        raise IOError(f'GRANULE subdirectory "{granule_dir}\*" does not exist.')
+    meta_file = granule_sub_dir.joinpath('MTD_TL.xml')
+    if not meta_file.exists():
+        raise IOError(f'GRANULE meta file "{meta_file}" does not exist.')
     return meta_file
 
 
-def _get_node(root, node_name):
-    for node in root:
-        if node_name in node.tag:
-            return node
-    return None
-
-
 def _get_mean_angles(metafile: pathlib.Path) -> Tuple[float, float]:
-    tree = ET.parse(metafile)
+    tree = etree.parse(str(metafile))
     root = tree.getroot()
-    geometric_info = _get_node(root, "Geometric_Info")
-    tile_angles = _get_node(geometric_info, "Tile_Angles")
-    mean_angles = _get_node(tile_angles, "Mean_Sun_Angle")
-    for angle in mean_angles:
-        if "ZENITH" in angle.tag:
-            zenith = float(angle.text)
-        elif "AZIMUTH" in angle.tag:
-            azimuth = float(angle.text)
-        else:
-            raise ValueError("Unkown angle: {}".format(angle.tag))
+
+    mean_angle_tag = 'n1:Geometric_Info/Tile_Angles/Mean_Sun_Angle'
+    mean_angles = root.find(mean_angle_tag, root.nsmap)
+    if mean_angles is None:
+        raise ValueError(f'Could not find "{mean_angle_tag}" in meta file.')
+
+    zenith = mean_angles.find("ZENITH_ANGLE")
+    azimuth = mean_angles.find("AZIMUTH_ANGLE")
+    if zenith is None or azimuth is None:
+        raise ValueError(f'Could not find angles in {mean_angles}')
+
+    zenith = float(zenith.text)
+    azimuth = float(azimuth.text)
     return zenith, azimuth
-
-
-def _get_grid_dimensions(metafile: pathlib.Path) -> Generator[int, int, int]:
-    tree = ET.parse(metafile)
-    root = tree.getroot()
-    geometric_info = _get_node(root, "Geometric_Info")
-    geocoding = _get_node(geometric_info, "Tile_Geocoding")
-    for node in geocoding:
-        if node.tag == "Size":
-            nrows = ncols = None
-            for el in node:
-                if el.tag == "NROWS":
-                    nrows = int(el.text)
-                elif el.tag == "NCOLS":
-                    ncols = int(el.text)
-                else:
-                    raise ValueError("Unknown element '{}' in node '{}'".format(el.tag, node))
-            resolution = int(node.get("resolution"))
-            yield (nrows, ncols, resolution)
-
-
-def _get_resolution(shape, meta_file):
-    resolution = None
-    erows, ecols = shape
-    for nrows, ncols, res in _get_grid_dimensions(meta_file):
-        if nrows == erows and ncols == ecols:
-            resolution = res
-    if resolution is None:
-        raise ValueError(
-                "Could not find a resolution for elevation model of shape {}".format(shape))
-    return resolution
 
 
 def xyray_vector(azimuth, transform):
@@ -95,9 +67,7 @@ def xyray_vector(azimuth, transform):
     return x, y
 
 
-def _run_shader(raw_data_dir, elevation_model, transform, resolution, chunk_size, num_workers):
-    meta_file = _get_metafile(raw_data_dir)
-    zenith, azimuth = _get_mean_angles(meta_file)
+def run_shader(elevation_model, transform, resolution, zenith, azimuth, chunk_size=100, workers=4):
     ray = xyray_vector(azimuth, transform)
 
     def worker(ystart):
@@ -105,11 +75,11 @@ def _run_shader(raw_data_dir, elevation_model, transform, resolution, chunk_size
         shadow = hillshade(elevation_model, zenith, ray, resolution, ystart, yend)
         return shadow
 
-    with concurrent.futures.ThreadPoolExecutor(num_workers) as executor:
+    with concurrent.futures.ThreadPoolExecutor(workers) as executor:
         ystart = np.arange(0, elevation_model.shape[0], chunk_size)
         results = executor.map(worker, ystart)
         shadow = []
-        pbar = tqdm.tqdm(total=ystart.shape[0], desc="Image chunks")
+        pbar = tqdm.tqdm(total=ystart.shape[0], desc='Image chunks')
         for res in results:
             shadow.append(res)
             pbar.update()
@@ -122,10 +92,10 @@ def _run_shader(raw_data_dir, elevation_model, transform, resolution, chunk_size
 @click.argument('elevation_infile', type=click.Path(file_okay=True))
 @click.argument('s2_dirs', type=GlobbityGlob())
 @click.argument('shaded_outfile', type=click.Path(file_okay=True))
-@click.option("--chunk-size", default=100, type=int,
-              help="""Chunk size of the image in y direction that is processed at a time.\
- Only affects the progress bar update frequency. Defaults to 100.""")
-@click.option("--workers", default=4, help="Number of workers. Defaults to 4.")
+@click.option('--chunk-size', default=100, type=int,
+              help='''Chunk size of the image in y direction that is processed at a time.\
+ Only affects the progress bar update frequency. Defaults to 100.''')
+@click.option('--workers', default=4, help='Number of workers. Defaults to 4.')
 def cli(elevation_infile, s2_dirs, shaded_outfile, chunk_size, workers):
     """Calculates shaded regions based on and elevation model and incident angles
     that are read from S2 raw data directories.
@@ -138,6 +108,8 @@ def cli(elevation_infile, s2_dirs, shaded_outfile, chunk_size, workers):
 
         shaded_outfile:     output file (.tif)
     """
+    if not s2_dirs:
+        raise IOError('S2 directory does not exist.')
 
     with rasterio.open(elevation_infile, 'r') as src:
         profile = src.profile.copy()
@@ -146,9 +118,11 @@ def cli(elevation_infile, s2_dirs, shaded_outfile, chunk_size, workers):
         resolution = src.res
 
     shadow = np.zeros(elevation_model.shape, dtype=int)
-    for raw_data_dir in tqdm.tqdm(s2_dirs, desc="Angles"):
-        shadow += _run_shader(
-                raw_data_dir, elevation_model, transform, resolution, chunk_size, workers)
+    for raw_data_dir in tqdm.tqdm(s2_dirs, desc='Angles'):
+        meta_file = _get_metafile(raw_data_dir)
+        zenith, azimuth = _get_mean_angles(meta_file)
+        shadow += run_shader(
+                elevation_model, transform, resolution, zenith, azimuth, chunk_size, workers)
     shadow = shadow.astype(np.float32)
     shadow /= shadow.max()
 
