@@ -76,7 +76,8 @@ def rasterize(azimuth, transform=None):
     return xdir, ydir
 
 
-def run_shader(elevation_model, transform, resolution, zenith, azimuth, chunk_size=100, workers=4):
+def run_shader(elevation_model, transform, resolution, zenith, azimuth,
+               chunk_size=100, num_workers=4):
     """Calculate shaded regions based on the elevation model and the incident angles of the sun.
 
     Params:
@@ -92,7 +93,7 @@ def run_shader(elevation_model, transform, resolution, zenith, azimuth, chunk_si
             azimuth in degrees
         chunk_size (int):
             splits the shading calculation into chunk sized tiles in the y-direction
-        workers (int):
+        num_workers (int):
             number of threads to spawn
     """
     ray = rasterize(azimuth, transform)
@@ -102,7 +103,7 @@ def run_shader(elevation_model, transform, resolution, zenith, azimuth, chunk_si
         shadow = hillshade(elevation_model, resolution, zenith, ray, ystart, yend)
         return shadow
 
-    with concurrent.futures.ThreadPoolExecutor(workers) as executor:
+    with concurrent.futures.ThreadPoolExecutor(num_workers) as executor:
         ystart = np.arange(0, elevation_model.shape[0], chunk_size)
         results = executor.map(worker, ystart)
         shadow = []
@@ -127,8 +128,8 @@ def run_shader(elevation_model, transform, resolution, zenith, azimuth, chunk_si
     '--chunk-size', default=100, type=int, show_default=True,
     help='Chunk size of the image in y direction that is processed at a time.'
     'Only affects the progress bar update frequency.')
-@click.option('--workers', default=4, show_default=True, help='Number of workers.')
-def cli(s2_dirs, elevation_infile, shaded_outfile, chunk_size, workers):
+@click.option('--num-workers', default=4, show_default=True, help='Number of workers.')
+def cli(s2_dirs, elevation_infile, shaded_outfile, chunk_size, num_workers):
     """Calculates shaded regions based on and elevation model and incident angles
     that are read from S2 raw data directories."""
     if not s2_dirs:
@@ -145,7 +146,7 @@ def cli(s2_dirs, elevation_infile, shaded_outfile, chunk_size, workers):
         meta_file = _get_metafile(raw_data_dir)
         zenith, azimuth = _get_mean_angles(meta_file)
         shadow += run_shader(
-            elevation_model, transform, resolution, zenith, azimuth, chunk_size, workers)
+            elevation_model, transform, resolution, zenith, azimuth, chunk_size, num_workers)
     shadow = shadow.astype(np.float32)
     shadow /= shadow.max()
 
