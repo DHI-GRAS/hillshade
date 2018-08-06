@@ -22,9 +22,9 @@ class GlobbityGlob(click.ParamType):
 def _get_metafile(raw_data_dir: pathlib.Path) -> pathlib.Path:
     """Finds the GRANULE meta file in a S2 data directory."""
     granule_dir = raw_data_dir.joinpath('GRANULE')
-    granule_sub_dir = granule_dir.glob('*')
+    granule_sub_dirs = granule_dir.glob('*')
     try:
-        granule_sub_dir = next(granule_sub_dir)
+        granule_sub_dir = next(granule_sub_dirs)
     except StopIteration:
         raise IOError(f'subdirectory of "{granule_dir}" does not exist.')
     meta_file = granule_sub_dir.joinpath('MTD_TL.xml')
