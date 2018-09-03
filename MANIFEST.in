@@ -1,0 +1,2 @@
+include versioneer.py
+include hillshade/_version.py
