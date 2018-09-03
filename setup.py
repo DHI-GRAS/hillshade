@@ -1,9 +1,11 @@
-from setuptools import setup
+from setuptools import setup, find_packages
+import versioneer
 
 setup(
     name='hillshade',
-    version='0.1',
-    py_modules=['hillshade'],
+    version=versioneer.get_version(),
+    cmdclass=versioneer.get_cmdclass(),
+    packages=find_packages(),
     install_requires=[
         'lxml',
         'Click',
