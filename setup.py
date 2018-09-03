@@ -24,6 +24,6 @@ setup(
     },
     entry_points='''
         [console_scripts]
-        hillshade=hillshade.cli:cli
+        hillshade=hillshade.scripts.cli:cli
     ''',
 )
