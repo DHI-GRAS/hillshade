@@ -1,13 +1,14 @@
 import os
+
 import click
 from click.testing import CliRunner
 import numpy as np
 import affine
 import rasterio
-from hillshade import cli
 
 
 def test_cli():
+    from hillshade.scripts import cli
     runner = CliRunner()
     dirname = os.path.dirname(os.path.realpath(__file__))
     s2dir = os.path.join(dirname, "s2dir")
