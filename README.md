@@ -4,7 +4,7 @@ Calculates shaded regions based on an elevation model and the zenith/azimuth of 
 The scripts needs and elevation model and one or more S2 data directories to read the angles from.
 Usage:
 
-    hillshade elevation_model.tif s2_data/*
+    hillshade -i elevation_model.tif -o hillshade.tif s2_data/*.SAFE
 
 Install the package with:
 
