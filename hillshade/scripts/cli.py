@@ -66,13 +66,21 @@ def rasterize(azimuth, transform=None):
         xdir -= transform.xoff
         ydir -= transform.yoff
 
-    slope = ydir / xdir
+        signx=np.sign(xdir)
+        signy=np.sign(ydir)
+
+    slope = np.absolute(ydir / xdir)
+
     if slope < 1. and slope > -1.:
         xdir = 1.
         ydir = slope
     else:
         xdir = 1. / slope
         ydir = 1.
+
+    xdir= signx*xdir
+    ydir= signy*ydir
+
     return xdir, ydir
 
 
