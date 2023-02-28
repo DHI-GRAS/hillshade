@@ -41,7 +41,7 @@ def hillshade(elevation_model, resolution, zenith, ray, ystart, yend):
         shadow (np.ndarray):
             an array of ones where there is shade and zeros otherwise
     """
-    if max(ray) != 1.:
+    if max(np.abs(np.array(ray))) != 1.:
         raise ValueError("xy-direction is not rasterized.")
     shadow = np.zeros((yend - ystart, elevation_model.shape[1]), dtype=np.int64)
     zenith = np.deg2rad(90 - zenith)
