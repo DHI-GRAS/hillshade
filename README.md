@@ -6,6 +6,8 @@ Usage:
 
     hillshade -i elevation_model.tif -o hillshade.tif s2_data/*.SAFE
 
+#### Note: The elevation model must be in UTM projection!
+
 Install the package with:
 
     git clone https://github.com/DHI-GRAS/hillshade
